@@ -4,51 +4,59 @@ import os
 app = Flask(__name__)
 
 @app.route("/", methods=["GET", "POST"])
-def xmpp_raw_stream_gateway():
-    # Force read raw input data blocks bypassing web server definitions
+def xmpp_bosh_gateway():
+    # Capture raw packet stream
     raw_payload = request.data.decode("utf-8", errors="ignore")
-    print(f"\n[INCOMING STREAM PACKET]: {raw_payload}")
+    print(f"\n[INCOMING CORE TRAFFIC]: {raw_payload}")
 
-    # 1. Handle Initial Handshake Header Request
-    if "stream:stream" in raw_payload:
-        stream_init = (
-            "<?xml version='1.0'?>"
-            "<stream:stream xmlns='jabber:client' "
-            "xmlns:stream='http://jabber.org' "
-            "id='render_bypass_session_000' version='1.0' xml:lang='en'>"
-            "<stream:features>"
+    # 1. Standard Web Browser Check (Bypasses initial connection errors)
+    if request.method == "GET" and not raw_payload:
+        return "XMPP BOSH Gateway Live", 200
+
+    # 2. Match Stream Initiation Block
+    if "stream:stream" in raw_payload or "<body" in raw_payload:
+        response_body = (
+            "<body xmlns='http://jabber.org' "
+            "sid='render_secure_proxy_session' authid='12345' "
+            "requests='2' inactivity='30' polling='5' requests='2' hold='1'>"
+            "<stream:features xmlns:stream='http://jabber.org'>"
             "<mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'>"
             "<mechanism>PLAIN</mechanism>"
             "</mechanisms>"
-            "</stream:features>"
-        )
-        # Bypasses Flask's web engine and outputs raw data bytes directly into the interface port
-        return Response(stream_init, mimetype="text/plain")
-
-    # 2. Bypasses authentication check and injects profile structural features
-    elif "auth" in raw_payload or "mechanisms" in raw_payload:
-        success_payload = (
-            "<success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>"
-            "<stream:features>"
             "<bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/>"
             "</stream:features>"
+            "</body>"
         )
-        print("[SUCCESS] Trout passed security authentication checks over the cloud!")
-        return Response(success_payload, mimetype="text/plain")
+        # Returns application/xml to perfectly satisfy Trout's backend parser
+        return Response(response_body, mimetype="application/xml")
 
-    # 3. Handle Resource Binding to prevent Trout from silently crashing after logging in
+    # 3. Intercept Authentication Step and Auto-Approve the Session
+    elif "auth" in raw_payload:
+        auth_success = (
+            "<body xmlns='http://jabber.org'>"
+            "<success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>"
+            "</body>"
+        )
+        print("[SUCCESS] Trout passed security authentication check via Render BOSH!")
+        return Response(auth_success, mimetype="application/xml")
+
+    # 4. Bind Account Profile Layout to prevent the app from closing down
     elif "bind" in raw_payload:
-        bind_xml = (
+        bind_ok = (
+            "<body xmlns='http://jabber.org'>"
             "<iq type='result' id='bind_1'>"
             "<bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'>"
             "<jid>admin@://onrender.com</jid>"
             "</bind>"
             "</iq>"
+            "</body>"
         )
-        print("[SUCCESS] Structural account profile layer bound safely.")
-        return Response(bind_xml, mimetype="text/plain")
+        print("[SUCCESS] App interface profile channel bound successfully.")
+        return Response(bind_ok, mimetype="application/xml")
 
-    return Response("<iq type='result' id='ok'/>", mimetype="text/plain")
+    # Catch-all empty layout binder
+    empty_body = "<body xmlns='http://jabber.org'><iq type='result' id='default_ok'/></body>"
+    return Response(empty_body, mimetype="application/xml")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
